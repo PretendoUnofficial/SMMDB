@@ -30,7 +30,12 @@ const sanitize = (input) => {
 
 
 const app = express();
-app.set('trust proxy', 1 /* number of proxies between user and server */)
+app.set('trust proxy', 1)
+
+app.use((req, res, next) => {
+    res.locals.baseUrl = `${req.protocol}://${req.get("host")}`;
+    next();
+});
 const downloadLimit = rateLimit({
     windowMs: 5 * 60 * 1000,
     limit: 15,
@@ -343,6 +348,133 @@ app.get("/api/course/:pid", courseRequestLimit, (req, res) => {
                         : "0.00";
                     res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=14400');
                     res.status(200).end(JSON.stringify(row));
+                    conn.end();
+                }).catch(err => {
+                console.log(err);
+                conn.end();
+                return res.status(500).end("request error");
+            })
+        }).catch(err => {
+        console.log('Reconnecting to DB...');
+        pool.end();
+        pool = createPool();
+        return res.status(500).end("database down");
+    });
+});
+app.get("/api/course/:pid/activityembed", courseRequestLimit, (req, res) => {
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const {pid} = req.params;
+    pool.getConnection()
+        .then(conn => {
+            conn.query("SELECT `levelid`, `levelcode`, l.`name`, `creation`, `ownerid`, `autoscroll`, `theme`, `subtheme`, `gamestyle`, `objcount`, `subobjcount`, `timelimit`, `stars`," +
+                " `attempts`, `clears`, `failures`, `user_plays`, `last_updated`, `deleted`," +
+                "u.`pnid`, u.`name` AS `owner_name` " +
+                " FROM `levels` l " +
+                "JOIN `users` u ON l.`ownerid` = u.`pid` " +
+                " WHERE `levelid` = ?", pid)
+                .then((rows) => {
+                    let row = rows[0]
+                    const activity = {
+                        "@context": [
+                        ],
+                        "id": `${baseUrl}/courses/${row.levelid}`,
+                        "type": "Note",
+                        "summary": row.name,
+                        "published": new Date(Number(row.creation) * 1000).toISOString(),
+                        "url": `${baseUrl}/courses/${row.levelid}`,
+                        "attributedTo": `${baseUrl}/api/user/${row.ownerid}/activityembed`,
+                        "attachment": [
+                            {
+                                "type": "Document",
+                                "mediaType": "image/png",
+                                "url": `${baseUrl}/course/${row.levelid}/thumb`,
+                                "name": "Thumbnail"
+                            }
+                        ],
+                        "content": `${row.levelcode} - ${row.stars} 🌟`,
+                    }
+
+
+                    res.set("Content-Type", "application/activity+json; charset=utf-8");
+                    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=14400");
+                    res.status(200).json(activity);
+
+                    conn.end();
+                }).catch(err => {
+                console.log(err);
+                conn.end();
+                return res.status(500).end("request error");
+            })
+        }).catch(err => {
+        console.log('Reconnecting to DB...');
+        pool.end();
+        pool = createPool();
+        return res.status(500).end("database down");
+    });
+});
+app.get("/api/user/:pid/activityembed", courseRequestLimit, (req, res) => {
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const {pid} = req.params;
+    pool.getConnection()
+        .then(conn => {
+            conn.query("SELECT `pid`, `name`, `pnid` FROM `users` WHERE `pid` = ?", pid)
+                .then((rows) => {
+                    let row = rows[0]
+                    const activity = {
+                        "@context": [
+                        ],
+                        "id": `${baseUrl}/api/user/${row.pid}`,
+                        "type": "Person",
+                        "url": `${baseUrl}/user/${row.pid}`,
+                        "preferredUsername": row.pnid,
+                        "name": row.name,
+                        "icon": {
+                            "type": "Image",
+                            "mediaType": "image/png",
+                            "url": `https://r2-cdn.pretendo.cc/mii/${row.pid}/normal_face.png`
+                        }
+                    }
+
+
+                    res.set("Content-Type", "application/activity+json; charset=utf-8");
+                    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=14400");
+                    res.status(200).json(activity);
+
+                    conn.end();
+                }).catch(err => {
+                console.log(err);
+                conn.end();
+                return res.status(500).end("request error");
+            })
+        }).catch(err => {
+        console.log('Reconnecting to DB...');
+        pool.end();
+        pool = createPool();
+        return res.status(500).end("database down");
+    });
+});
+app.get("/api/course/:pid/oembed", courseRequestLimit, (req, res) => {
+    const {pid} = req.params;
+    pool.getConnection()
+        .then(conn => {
+            conn.query("SELECT `levelid`, `levelcode`, l.`name`, `creation`, `ownerid`," +
+                "u.`pnid`, u.`name` AS `owner_name` " +
+                " FROM `levels` l " +
+                "JOIN `users` u ON l.`ownerid` = u.`pid` " +
+                " WHERE `levelid` = ?", pid)
+                .then((rows) => {
+                    let row = rows[0]
+                    const oembed = {
+                        "provider_name":"Super Mario Maker Database",
+                        "provider_url":"/",
+                        "title": row.name,
+                        "author_name":row.owner_name,
+                        "author_url": "/user/"+row.ownerid,
+                        "type":"rich","version":"1.0"
+                    };
+                    res.set('Content-Type', 'application/json+oembed');
+                    res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=14400');
+                    res.status(200).json(oembed);
                     conn.end();
                 }).catch(err => {
                 console.log(err);
