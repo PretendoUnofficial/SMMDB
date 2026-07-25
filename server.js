@@ -391,7 +391,9 @@ app.get("/api/course/:pid/activityembed", courseRequestLimit, (req, res) => {
                                 "name": "Thumbnail"
                             }
                         ],
-                        "content": `${row.levelcode} - ${row.stars} 🌟`,
+                        "content": `${row.levelcode}<br>${row.stars} 🌟 • ${(row.clears + row.failures)
+                            ? ((row.clears / (row.clears + row.failures)) * 100).toFixed(2)
+                            : "0.00"}% 🏁`,
                     }
 
 
