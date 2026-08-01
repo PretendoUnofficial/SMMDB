@@ -4,17 +4,16 @@ import hmac
 import io
 import json
 import logging
-import multiprocessing
 import os
 import struct
 import time
 import sys
+from datetime import datetime, timedelta
 
 import anyio
 import mariadb
 from anynet import http
 from anynet.http import HTTPResponse
-from anynet.util import catch
 from mariadb import Connection
 from nintendo import nnas
 from nintendo.nex import backend, settings, streams, common, rmc, ranking, ranking2
@@ -511,7 +510,8 @@ async def fetchRandomLevels(cli):
     await asyncio.gather(*tasks)
 
 
-
+nex_token = None
+nex_token_expire = datetime.now()
 class ClientManager:
     def __init__(self):
         self.be = None
@@ -522,6 +522,7 @@ class ClientManager:
         self._be_cm = None
         self._login_cm = None
     async def __aenter__(self):
+        global nex_token, nex_token_expire
         DEVICE_ID = int(os.getenv("DEVICE_ID"))
         SERIAL_NUMBER = os.getenv("SERIAL_NUMBER")
         SYSTEM_VERSION = int(os.getenv("SYSTEM_VERSION"), 16)
@@ -536,19 +537,23 @@ class ClientManager:
         ACCESS_KEY = "9f2b4678"
         NEX_VERSION = 30803
         GAME_SERVER_ID = 0x1018DB00
-
-        nas = nnas.NNASClient()
-        nas.set_device(DEVICE_ID, SERIAL_NUMBER,
-                       SYSTEM_VERSION, CERT)
-        nas.set_title(TITLE_ID, TITLE_VERSION)
-        nas.set_locale(REGION_ID, COUNTRY_NAME, LANGUAGE)
-
-        access_token = await nas.login(USERNAME, PASSWORD, "hash")
-
         s = settings.default()
         s.configure(ACCESS_KEY, NEX_VERSION)
+        if datetime.now() >= nex_token_expire:
+            print("Expired token. Regenerating...")
+            print(datetime.now())
+            print(nex_token_expire)
+            nas = nnas.NNASClient()
+            nas.set_device(DEVICE_ID, SERIAL_NUMBER,
+                           SYSTEM_VERSION, CERT)
+            nas.set_title(TITLE_ID, TITLE_VERSION)
+            nas.set_locale(REGION_ID, COUNTRY_NAME, LANGUAGE)
 
-        nex_token = await nas.get_nex_token(access_token.token, GAME_SERVER_ID)
+            access_token = await nas.login(USERNAME, PASSWORD, "hash")
+
+            nex_token_expire = datetime.now() + timedelta(hours=1) # Ratelimit
+            nex_token = await nas.get_nex_token(access_token.token, GAME_SERVER_ID)
+            print("Token regenerated")
 
         self._be_cm = backend.connect(s, nex_token.host, nex_token.port)
         self.be = await self._be_cm.__aenter__()
@@ -694,16 +699,17 @@ def main():
         asyncio.run(runManual(int(sys.argv[1])))
         return
     #asyncio.run(test())
+    asyncio.run(main_loop())
+async def main_loop():
     while True:
-        time.sleep(1)
-        p = multiprocessing.Process(target=start,
-                                    args=())
-        p.start()
-        p.join(60)
-        if p.is_alive():
-            print("process stuck... let's kill it...")
-            p.terminate()
-            p.join()
+        try:
+            await asyncio.wait_for(startAsync(), timeout=60)
+        except asyncio.TimeoutError:
+            print("Timed out after 60 seconds")
+        except Exception:
+            logging.exception("Worker crashed")
+
+        await asyncio.sleep(1)
 
 
 
