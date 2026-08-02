@@ -30,7 +30,7 @@ connection: Connection = None
 
 logging.basicConfig(level=logging.INFO)
 
-sem = asyncio.Semaphore(5) #Limiting parallel processing
+
 
 
 class DataStoreCustomRankingResult(common.Structure):
@@ -380,6 +380,14 @@ KNOWN_CUSTOM_RANKING_APPLICATION_IDS = [
     300003600,
 ]
 
+def debug_sql(sql, params):
+    parts = sql.split("?")
+    result = []
+    for i, part in enumerate(parts[:-1]):
+        result.append(part)
+        result.append(repr(params[i]))
+    result.append(parts[-1])
+    return "".join(result)
 
 async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
     print(level_id)
@@ -391,7 +399,7 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
     except RMCError as e:
         if e.result().name() == "DataStore::NotFound":
             sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
-            data = (time.time(),input)
+            data = (time.time(),level_id)
             connection.cursor().execute(sql, data)
             connection.commit()
             print("Marked level as deleted!" )
@@ -399,7 +407,6 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
             print(e.result().name())
         return
     print(get_object_response)
-    print("Hello")
     if meta is None:
         print("Generating new meta")
         metaparam = datastore_smm.DataStoreGetMetaParam()
@@ -480,12 +487,15 @@ async def process_smm_levels(cli, level_ids: list[int]):
 
 
     print("===========")
+    sem = asyncio.Semaphore(5) #Limiting parallel processing
     async def worker(m):
         async with sem:
             return await process_smm_level(cli, m.data_id, m)
 
-    tasks = [asyncio.create_task(worker(m)) for m in meta if m.data_id != 0]
-    await asyncio.gather(*tasks)
+    async with asyncio.TaskGroup() as tg:
+        for m in meta:
+            if m.data_id != 0:
+                tg.create_task(worker(m))
 
 
 async def updateUserInDB(pid):
@@ -502,12 +512,14 @@ async def fetchRandomLevels(cli):
     param.result_range.size = int(os.getenv("SMMDB_MAXLEVELS", "20"))
     objects = await getCourses(cli, param)
     print("Found %d objects" % len(objects))
+    sem = asyncio.Semaphore(5) #Limiting parallel processing
     async def worker(o):
         level: DataStoreCustomRankingResult = o
         async with sem:
             return await process_smm_level(cli, level.metaInfo.data_id, level.metaInfo)
-    tasks = [asyncio.create_task(worker(o)) for o in objects]
-    await asyncio.gather(*tasks)
+    async with asyncio.TaskGroup() as tg:
+        for o in objects:
+            tg.create_task(worker(o))
 
 
 nex_token = None
@@ -551,7 +563,7 @@ class ClientManager:
 
             access_token = await nas.login(USERNAME, PASSWORD, "hash")
 
-            nex_token_expire = datetime.now() + timedelta(hours=1) # Ratelimit
+            nex_token_expire = datetime.now() + timedelta(minutes=10) # Ratelimit
             nex_token = await nas.get_nex_token(access_token.token, GAME_SERVER_ID)
             print("Token regenerated")
 
@@ -695,21 +707,33 @@ def main():
     global connection
     connection = mariadb.connect(**conn_params)
 
-    if(len(sys.argv)==2):
+    if len(sys.argv)==2:
         asyncio.run(runManual(int(sys.argv[1])))
         return
     #asyncio.run(test())
-    asyncio.run(main_loop())
+    while True:
+        try:
+            asyncio.run(main_loop())
+        except asyncio.CancelledError:
+            print("Ignoring cancellation")
+            continue
 async def main_loop():
     while True:
         try:
-            await asyncio.wait_for(startAsync(), timeout=60)
+            await asyncio.wait_for(startAsync(), timeout=120)
         except asyncio.TimeoutError:
             print("Timed out after 60 seconds")
         except Exception:
             logging.exception("Worker crashed")
+            nex_token = None
+            nex_token_expire = datetime.now()
 
-        await asyncio.sleep(1)
+
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            print("Ignoring cancellation")
+            continue
 
 
 
