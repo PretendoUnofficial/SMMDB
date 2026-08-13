@@ -477,25 +477,16 @@ async def process_smm_levels(cli, level_ids: list[int]):
     if len(level_ids) == len(meta):
         for inp,output in zip(level_ids, meta):
             print(inp,output)
-            if output == 0 or output.status == 0:
+            print(output.size)
+            if output == 0 or output.size == 0:
                 sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
                 data = (time.time(),inp)
                 connection.cursor().execute(sql, data)
                 connection.commit()
                 print("Marked level as deleted!" )
+            else:
+                await process_smm_level(cli, inp,output)
 
-
-
-    print("===========")
-    sem = asyncio.Semaphore(5) #Limiting parallel processing
-    async def worker(m):
-        async with sem:
-            return await process_smm_level(cli, m.data_id, m)
-
-    async with asyncio.TaskGroup() as tg:
-        for m in meta:
-            if m.data_id != 0:
-                tg.create_task(worker(m))
 
 
 async def updateUserInDB(pid):
@@ -625,7 +616,7 @@ def updateLevelInDB(level, course, records, buffer_queues):
         time.sleep(3)
 
     print("Storing "+level.name+" into the database...")
-    sql = "INSERT INTO levels (levelid, levelcode, name, creation, ownerid, autoscroll, subautoscroll, theme, subtheme, gamestyle, objcount, subobjcount, timelimit, stars, first_clear_pid,first_clear_time,best_clear_pid,best_clear_time,best_clear_score, attempts,clears, failures, user_plays, thumb, preview, last_updated, overworld, subworld) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name = VALUES(name), thumb = VALUES(thumb), preview = VALUES(preview), last_updated = VALUES(last_updated), stars = VALUES(stars), attempts = VALUES(attempts), clears = VALUES(clears),failures = VALUES(failures),user_plays = VALUES(user_plays), subautoscroll = VALUES(subautoscroll), overworld = VALUES(overworld), subworld = VALUES(subworld), first_clear_pid = VALUES(first_clear_pid), first_clear_time = VALUES(first_clear_time), best_clear_pid = VALUES(best_clear_pid), best_clear_time = VALUES(best_clear_time), best_clear_score = VALUES(best_clear_score)"
+    sql = "INSERT INTO levels (levelid, levelcode, name, creation, ownerid, autoscroll, subautoscroll, theme, subtheme, gamestyle, objcount, subobjcount, timelimit, stars, first_clear_pid,first_clear_time,best_clear_pid,best_clear_time,best_clear_score, attempts,clears, failures, user_plays, thumb, preview, last_updated, overworld, subworld) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name = VALUES(name), thumb = VALUES(thumb), preview = VALUES(preview), last_updated = VALUES(last_updated), stars = VALUES(stars), attempts = VALUES(attempts), clears = VALUES(clears),failures = VALUES(failures),user_plays = VALUES(user_plays), subautoscroll = VALUES(subautoscroll), overworld = VALUES(overworld), subworld = VALUES(subworld), first_clear_pid = VALUES(first_clear_pid), first_clear_time = VALUES(first_clear_time), best_clear_pid = VALUES(best_clear_pid), best_clear_time = VALUES(best_clear_time), best_clear_score = VALUES(best_clear_score), deleted = 0"
     data = (level.data_id,
             getLevelCode(level.data_id),
             level.name,
@@ -676,7 +667,6 @@ async def updateOldestLevels(cli):
     query = """
             SELECT `levelid`
             FROM levels
-            WHERE deleted = 0
             ORDER BY `last_updated` ASC
             LIMIT 50;
             """
