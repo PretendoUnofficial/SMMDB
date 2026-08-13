@@ -466,7 +466,6 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
 
 async def process_smm_levels(cli, level_ids: list[int]):
     print(level_ids)
-    print("Requested Length: "+str(len(level_ids)))
     metaparam = datastore_smm.DataStoreGetMetaParam()
     metaparam.persistence_target = datastore_smm.DataStorePersistenceTarget()
     metaparam.persistence_target.owner_id = 0
@@ -475,9 +474,10 @@ async def process_smm_levels(cli, level_ids: list[int]):
     metaparam.access_password = 0
     meta: list[DataStoreMetaInfo] = (await cli.get_metas(level_ids, metaparam)).info
     print("Returned Length: "+str(len(meta)))
-    if(len(level_ids) == len(meta)):
+    if len(level_ids) == len(meta):
         for inp,output in zip(level_ids, meta):
-            if output == 0:
+            print(inp,output)
+            if output == 0 or output.status == 0:
                 sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
                 data = (time.time(),inp)
                 connection.cursor().execute(sql, data)
@@ -688,9 +688,9 @@ async def updateOldestLevels(cli):
 
 async def test():
     async with ClientManager() as client:
-        await process_smm_level(client, 1029664)
+        #await process_smm_level(client, 1029664)
         #await fetchRandomLevels(client)
-        #await updateRandomLevels(client)
+        await updateOldestLevels(client)
 
 async def runManual(levelid):
     async with ClientManager() as client:
