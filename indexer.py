@@ -400,8 +400,10 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
         if e.result().name() == "DataStore::NotFound":
             sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
             data = (time.time(),level_id)
-            connection.cursor().execute(sql, data)
+            cur = connection.cursor()
+            cur.execute(sql, data)
             connection.commit()
+            cur.close()
             print("Marked level as deleted!" )
         else:
             print(e.result().name())
@@ -443,15 +445,18 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
 
     s3_response:HTTPResponse = await http.get(s3_url, headers=s3_headers)
 
-    print(s3_response.status_code)
-    if s3_response.status_code == 404:
+    if s3_response.status_code == 404 or len(s3_response.body) == 0:
         sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
         data = (time.time(),level_id)
-        connection.cursor().execute(sql, data)
+        cur = connection.cursor()
+        cur.execute(sql, data)
         connection.commit()
+        cur.close()
         print("Marked level as deleted!" )
         return
+
     course = Course(s3_response.body)
+
 
 
     if len(course_records) > 0:
@@ -463,6 +468,8 @@ async def process_smm_level(cli, level_id: int, meta: DataStoreMetaInfo = None):
 
     await updateUserInDB(meta.owner_id)
     updateLevelInDB(meta, course, course_records, buffer_queues)
+    del s3_response
+    del course
 
 async def process_smm_levels(cli, level_ids: list[int]):
     print(level_ids)
@@ -481,8 +488,10 @@ async def process_smm_levels(cli, level_ids: list[int]):
             if output == 0 or output.size == 0:
                 sql = "UPDATE levels SET deleted = 1, last_updated = ? WHERE levelid = ?"
                 data = (time.time(),inp)
-                connection.cursor().execute(sql, data)
+                cur = connection.cursor()
+                cur.execute(sql, data)
                 connection.commit()
+                cur.close()
                 print("Marked level as deleted!" )
             else:
                 await process_smm_level(cli, inp,output)
@@ -494,8 +503,11 @@ async def updateUserInDB(pid):
     mii = await nas.get_mii(pid)
     sql = "INSERT INTO users (pid, name, pnid) VALUES (?,?,?) ON DUPLICATE KEY UPDATE name = VALUES(name), pnid = VALUES(pnid)"
     data = (pid, mii.name, mii.nnid)
-    connection.cursor().execute(sql, data)
+    cur = connection.cursor()
+    cur.execute(sql, data)
     connection.commit()
+    cur.close()
+
 
 
 async def fetchRandomLevels(cli):
@@ -646,8 +658,10 @@ def updateLevelInDB(level, course, records, buffer_queues):
             course.overworld.raw,
             course.subworld.raw
             )
-    connection.cursor().execute(sql, data)
+    cur = connection.cursor()
+    cur.execute(sql, data)
     connection.commit()
+    cur.close()
     print("Done")
 
 
@@ -674,6 +688,7 @@ async def updateOldestLevels(cli):
     cursor.execute(query)
     rows = cursor.fetchall()
     rows = [int(row[0]) for row in rows]
+    cursor.close()
     await process_smm_levels(cli,rows)
 
 async def test():
